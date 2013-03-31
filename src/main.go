@@ -1,14 +1,11 @@
-/**
- * Created with IntelliJ IDEA.
- * User: fawad
- * Date: 3/16/13
- * Time: 12:53 PM
- * To change this template use File | Settings | File Templates.
- */
 package main
 
 import "fmt"
+import "mylibrary"
 
 func main() {
-	fmt.Printf("Hello world!")
+	var message string
+	message = "Hello world"
+	fmt.Println(message)
+	fmt.Println(mylibrary.PrintMessage("pete"))
 }
