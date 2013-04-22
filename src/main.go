@@ -1,20 +1,8 @@
 package main
 
 import ("fmt"
-	"mylibrary"
 	"github.com/streadway/amqp"
-	"bufio"
-	"os"
-)
-
-const (
-	PI       = 3.14
-	Language = "Go"
-)
-const (
-	Red   = iota
-	Green = iota
-	Blue  = iota
+	"time"
 )
 
 func getChannel() (*amqp.Connection, *amqp.Channel) {
@@ -22,8 +10,8 @@ func getChannel() (*amqp.Connection, *amqp.Channel) {
 	channel, _ := conn.Channel()
 	return conn, channel
 }
-func doPublish(channel *amqp.Channel) {
-	for i := 0; i < 100000; i++ {
+func doPublish(channel *amqp.Channel, count int) {
+	for i := 0; i < count; i++ {
 		channel.Publish("bmexch", "", false, false, amqp.Publishing {
 				Headers:         amqp.Table{},
 				ContentType:     "text/plain",
@@ -35,13 +23,20 @@ func doPublish(channel *amqp.Channel) {
 	}
 
 }
-func doSubscribe(channel *amqp.Channel) {
+func doSubscribe(channel *amqp.Channel, count int) (<-chan bool) {
 	del, _ := channel.Consume("bmqueue", "", true, false, false, false, nil)
+	completed := 0
+	outChannel := make(chan bool)
 	go func(c <-chan amqp.Delivery) {
 		for _ = range c {
-			fmt.Print(".")
+			//fmt.Print(".")
+			completed += 1
+			if completed == count {
+				outChannel <- true
+			}
 		}
 	}(del)
+	return outChannel
 }
 
 func doBenchmark() {
@@ -52,23 +47,15 @@ func doBenchmark() {
 	channel1.ExchangeDeclare("bmexch", "fanout", true, false, false, false, nil)
 	channel1.QueueDeclare("bmqueue", true, false, false, false, nil)
 	channel1.QueueBind("bmqueue", "", "bmexch", false, nil)
-	go doPublish(channel1)
-	go doSubscribe(channel2)
-	fmt.Println("Please press enter to stop")
-	bufio.NewReader(os.Stdin).ReadLine()
-}
-func doPrint() {
-	message := "Hello go"
-	greeting := &message
-
-	*greeting = "hi"
-	fmt.Println(message)
-	fmt.Println(*greeting)
-	fmt.Println(Green)
-	fmt.Println(mylibrary.PrintMessage("pete"))
+	messageCount := 100000
+	fmt.Println("Publishing", messageCount, "messages")
+	startTime := time.Now()
+	go doPublish(channel1, messageCount)
+	<-doSubscribe(channel2, messageCount)
+	endTime := time.Now()
+	timeElapsed := endTime.Sub(startTime)
+	fmt.Println("Published", messageCount, "messages in", time.Duration(timeElapsed), "at", (float64(messageCount)/timeElapsed.Seconds()))
 }
 func main() {
-	//doPrint()
 	doBenchmark()
-
 }
