@@ -4,12 +4,13 @@ import ("fmt"
 	"github.com/streadway/amqp"
 	"time"
 	"strconv"
+	"flag"
+	"strings"
 )
 
 const (
 	persistentExchangeName = "bmexch"
 	persistentQueueName    = "bmqueue"
-	messageCount           = 10000
 )
 
 func getChannel(conn *amqp.Connection) *amqp.Channel {
@@ -18,7 +19,7 @@ func getChannel(conn *amqp.Connection) *amqp.Channel {
 }
 func doPublish(channel *amqp.Channel, count int, exchangeName string) {
 	for i := 0; i < count; i++ {
-		go channel.Publish(exchangeName, "", false, false, amqp.Publishing {
+		channel.Publish(exchangeName, "", false, false, amqp.Publishing {
 				Headers:         amqp.Table{},
 				ContentType:     "text/plain",
 				ContentEncoding: "",
@@ -50,20 +51,21 @@ func initializePermanentAmqpResources(channel *amqp.Channel, exchangeName string
 	channel.QueuePurge(queueName, false)
 }
 
-func benchmarkPubSub(url string) {
+func benchmarkPubSub(url string, iterations int) {
+	fmt.Println("Benchmarking pubsub")
 	conn1, _ := amqp.Dial(url)
 	channel1 := getChannel(conn1)
 	channel2 := getChannel(conn1)
 	defer conn1.Close()
 	initializePermanentAmqpResources(channel1, persistentExchangeName, persistentQueueName)
-	fmt.Println("Publishing", messageCount, "messages")
+	fmt.Println("Publishing", iterations, "messages")
 	startTime := time.Now()
-	go doPublish(channel1, messageCount, persistentExchangeName)
-	<-doSubscribe(channel2, messageCount, persistentQueueName)
+	go doPublish(channel1, iterations, persistentExchangeName)
+	<-doSubscribe(channel2, iterations, persistentQueueName)
 	endTime := time.Now()
 	timeElapsed := endTime.Sub(startTime)
-	fmt.Println("Published and received", messageCount, "messages on", url, "in", time.Duration(timeElapsed),
-		"at", (float64(messageCount)/timeElapsed.Seconds()), "records/sec")
+	fmt.Println("Published and received", iterations, "messages on", url, "in", time.Duration(timeElapsed),
+		"at", (float64(iterations)/timeElapsed.Seconds()), "records/sec")
 }
 
 func initializeAndDestroyEphemeralQueueAndExchange(connection *amqp.Connection, exchangeName string, queueName string, noWait bool) {
@@ -75,24 +77,32 @@ func initializeAndDestroyEphemeralQueueAndExchange(connection *amqp.Connection, 
 	channel.Consume(queueName, "", true, true, true, false, nil)
 }
 
-func benchmarkTempQueueExchangeCreationDeletion(url string) {
+func benchmarkTempQueueExchangeCreationDeletion(url string, iterations int) {
+	fmt.Println("Benchmarking temporary queue creation and cleanup")
 	conn1, _ := amqp.Dial(url)
 	defer conn1.Close()
 	startTime := time.Now()
-	for idx := 0; idx < messageCount; idx++ {
+	for idx := 0; idx < iterations; idx++ {
 		initializeAndDestroyEphemeralQueueAndExchange(conn1, "exchange" + strconv.Itoa(idx), "queue" + strconv.Itoa(idx), true)
 	}
 	endTime := time.Now()
 	timeElapsed := endTime.Sub(startTime)
-	fmt.Println("Created and destroyed queue and exchange", messageCount, "times on", url, "in", time.Duration(timeElapsed),
-		"at", (float64(messageCount)/timeElapsed.Seconds()), "records/sec")
+	fmt.Println("Created and destroyed queue and exchange", iterations, "times on", url, "in", time.Duration(timeElapsed),
+		"at", (float64(iterations)/timeElapsed.Seconds()), "records/sec")
 }
 
 func main() {
-	urls := []string{"amqp://guest:guest@localhost:5672/", "amqp://guest:guest@localhost:5673/"}
+	urlsOpt := flag.String("urls", "amqp://guest:guest@localhost:5672/,amqp://guest:guest@localhost:5673/", "URLS to run the tests against")
+	urls := strings.Split(*urlsOpt, ",")
+	iterations := flag.Int("iterations", 1000, "Number of iterations")
+	benchmarkPublishSubscribe := flag.Bool("runpubsub", false, "Benchmark publish/subscribe")
+	benchmarkTransientQueueCreationCleanup := flag.Bool("runtransientqueue", true, "Benchmark transient queue creation/cleanup")
+
+	flag.Parse()
+
 	for _, url := range urls {
-		benchmarkPubSub(url)
-		benchmarkTempQueueExchangeCreationDeletion(url)
+		if (*benchmarkPublishSubscribe) {benchmarkPubSub(url, *iterations)}
+		if (*benchmarkTransientQueueCreationCleanup) {benchmarkTempQueueExchangeCreationDeletion(url, *iterations)}
 	}
 
 }
