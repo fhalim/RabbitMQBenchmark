@@ -77,8 +77,19 @@ func initializeAndDestroyEphemeralQueueAndExchange(connection *amqp.Connection, 
 	channel.Consume(queueName, "", true, true, true, false, nil)
 }
 
-func benchmarkTempQueueExchangeCreationDeletion(url string, iterations int) {
-	fmt.Println("Benchmarking temporary queue creation and cleanup")
+
+func initializeAndDestroyTemporaryQueueAndExchange(connection *amqp.Connection, exchangeName string, queueName string, noWait bool) {
+	channel := getChannel(connection)
+	defer channel.Close()
+	queue, _ := channel.QueueDeclare("", false, true, true, false, nil)
+	channel.ExchangeDeclare(exchangeName, "fanout", false, true, false, false, nil)
+	channel.QueueBind(queue.Name, "", exchangeName, false, nil)
+	channel.Consume(queue.Name, "", true, true, true, false, nil)
+}
+
+
+func benchmarkTransientQueueExchangeCreationDeletion(url string, iterations int) {
+	fmt.Println("Benchmarking transient queue creation and cleanup")
 	conn1, _ := amqp.Dial(url)
 	defer conn1.Close()
 	startTime := time.Now()
@@ -91,18 +102,34 @@ func benchmarkTempQueueExchangeCreationDeletion(url string, iterations int) {
 		"at", (float64(iterations)/timeElapsed.Seconds()), "records/sec")
 }
 
+func benchmarkTemporaryQueueExchangeCreationDeletion(url string, iterations int) {
+	fmt.Println("Benchmarking temporary queue creation and cleanup")
+	conn1, _ := amqp.Dial(url)
+	defer conn1.Close()
+	startTime := time.Now()
+	for idx := 0; idx < iterations; idx++ {
+		initializeAndDestroyTemporaryQueueAndExchange(conn1, "exchange" + strconv.Itoa(idx), "queue" + strconv.Itoa(idx), true)
+	}
+	endTime := time.Now()
+	timeElapsed := endTime.Sub(startTime)
+	fmt.Println("Created and destroyed queue and exchange", iterations, "times on", url, "in", time.Duration(timeElapsed),
+		"at", (float64(iterations)/timeElapsed.Seconds()), "records/sec")
+}
+
 func main() {
 	urlsOpt := flag.String("urls", "amqp://guest:guest@localhost:5672/,amqp://guest:guest@localhost:5673/", "URLS to run the tests against")
 	urls := strings.Split(*urlsOpt, ",")
 	iterations := flag.Int("iterations", 1000, "Number of iterations")
-	benchmarkPublishSubscribe := flag.Bool("runpubsub", false, "Benchmark publish/subscribe")
+	benchmarkPublishSubscribe := flag.Bool("runpubsub", true, "Benchmark publish/subscribe")
 	benchmarkTransientQueueCreationCleanup := flag.Bool("runtransientqueue", true, "Benchmark transient queue creation/cleanup")
+	benchmarkTemporaryQueueCreationCleanup := flag.Bool("runtemporaryqueue", true, "Benchmark temporary queue creation/cleanup")
 
 	flag.Parse()
 
 	for _, url := range urls {
 		if (*benchmarkPublishSubscribe) {benchmarkPubSub(url, *iterations)}
-		if (*benchmarkTransientQueueCreationCleanup) {benchmarkTempQueueExchangeCreationDeletion(url, *iterations)}
+		if (*benchmarkTransientQueueCreationCleanup) {benchmarkTransientQueueExchangeCreationDeletion(url, *iterations)}
+		if (*benchmarkTemporaryQueueCreationCleanup) {benchmarkTemporaryQueueExchangeCreationDeletion(url, *iterations)}
 	}
 
 }
